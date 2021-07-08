@@ -1,0 +1,263 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Jul  4 21:50:38 2021
+
+@author: Krzysztof Nieradko
+"""
+
+#Load libraries
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import pmdarima as pm
+from pmdarima.model_selection import train_test_split
+import seaborn as sns
+import os
+
+#Define a class
+class WordlBank():
+    
+    def __init__(self, country_name: str = 'afg', times_series_name: str = 'NY.GDP.MKTP.CN'):
+        
+        """
+        Constructs all the necessary attributes for the WordlBank object. 
+        Forces to use json format.
+        
+        Parameters
+        ----------
+            country_name: str
+                - country. Default: "AFG"
+            times_series_name: str
+                - type of the time series. Default: "NY.GDP.MKTP.CN"
+            address_API: str
+                - creates a link to WorldBank's API using user's parameters
+            run_order_container: set
+                - creates a set of flags after each step
+        """
+        
+        self.country_name = country_name.upper()
+        self.times_series_name = times_series_name.upper()        
+        self.address_API = f'https://api.worldbank.org//v2//country//{country_name}//indicator//{times_series_name}?format=json'
+        
+        self.run_order_container = set()
+        
+                
+    def check_container(self, error_type: str) -> str:
+        
+        if error_type not in self.run_order_container:
+            
+            if error_type == "1. Data loaded":
+                return f"You can't visualize TS or make a forecast before loading the data! \
+                        Please use 'load_data' method first."
+            elif error_type == "2. Forecast created":
+                return "You can't return combined DF or show a forecast without making a forecast! \
+                        Please use 'create_forecast' method first."
+                    
+        return "OK"
+                    
+    
+    def check_connection(self) -> str:
+        
+        """
+        Function checks the connection.
+        
+        """    
+        response = requests.get(self.address_API)
+        txt = response.json() 
+        
+        try:
+            if txt[0].get('message')[0]['key'] == 'Invalid value' or response.status_code != 200:
+                return "Ups, something went wrong!"
+        except Exception:
+            return "Connection successful."
+
+
+    def load_data(self):
+        
+        """
+        Function returns time series according to the provided parameters.
+        Function makes sure that all records from all pages were loaded 
+        (WorldBank's API provides max. 50 rows per one site).
+         
+        Returns: pandas DataFrame
+        
+        """ 
+    
+        if self.check_connection() == "Ups, something went wrong!":
+            return f"Time series with the provided parameters (Country: {self.country_name}, \
+                     Series: {self.times_series_name}) \
+                     couldn't be loaded. Make sure such time series exists!"                
+        
+        #Get the information about the data first
+        information_dict = requests.get(self.address_API).json()[0]
+        
+        dates = []
+        values = []
+        
+        #Load the data. Check the number of pages to be loaded for each time series
+        for num_page in range(information_dict['pages']):
+            response = requests.get(f'{self.address_API}&page={num_page+1}') 
+            
+            for i in response.json()[1]:
+                dates.append(i['date'])
+                values.append(i['value'])
+        
+        #Create pandas data frame
+        self.time_series = pd.DataFrame({'Dates': list(map(int, dates)),
+                                         'TS_' + self.country_name.upper() + '_' + 
+                                         self.times_series_name.upper(): values})
+        
+        #Remove NA values if any
+        self.time_series.dropna(inplace = True)
+        
+        #Reverse the dataset for a clarity
+        self.time_series = self.time_series[::-1]
+        self.time_series.reset_index(drop=True, inplace=True)
+        
+        self.run_order_container.add("1. Data loaded")
+        
+        return self.time_series
+    
+    
+    def show_time_series(self):  
+        
+        """
+        Function uses seaborn library to show time series on a plot.
+        
+        Returns: seaborn lineplot
+        
+        """
+        
+        if self.check_container(error_type = "1. Data loaded") != "OK":
+            return self.check_container(error_type = "1. Data loaded")
+        
+        colors = ["#4374B3"]
+        sns.set_palette(sns.color_palette(colors))
+        plot = sns.lineplot(x="Dates", y=self.time_series.columns[1],  data=self.time_series, 
+                            linewidth = 3).set(title=f"Presented time series: {self.time_series.columns[1]}")
+        return plot
+    
+    
+    def create_forecast(self, n: int = 5):
+        
+        """
+        Uses auto.arima function to create a model and forecast based on the SARIMA (p, d, q) (P,D,Q) method.
+        Auto.Arima tries to find the most optimal parameters (both for differences and AR/MA terms) 
+        providing model with the lowest information criteria.
+        
+        Returns: pandas DataFrame
+        
+        Parameters
+        ----------
+            n: int
+                - forecast lenght. Default: 5        
+        """
+        
+        if self.check_container(error_type = "1. Data loaded") != "OK":
+            return self.check_container(error_type = "1. Data loaded")
+        
+        #Create basic forecast using auto_arima package
+        #Annual time series only
+        model = pm.auto_arima(self.time_series.iloc[:,1], seasonal=True, m=1)
+        forecast = model.predict(n_periods=n)
+        
+        max_index = int(self.time_series['Dates'].max())        
+              
+        self.ts_forecast = pd.DataFrame({'Dates': list(range(max_index + 1, max_index + n + 1)),
+                                          'TS_' + self.country_name.upper() + '_' + 
+                                          self.times_series_name.upper(): forecast})  
+        
+        #Create combined DF with additional column determining if raw TS or Forecast
+        time_series_export = self.time_series.copy()
+        time_series_export['Data_type'] = "Source time series"
+        
+        forecast_export = self.ts_forecast.copy()
+        forecast_export['Data_type'] = "Forecast" 
+               
+        self.combine_ts_forecast = None
+        self.combine_ts_forecast = pd.concat([time_series_export, forecast_export])  
+        self.combine_ts_forecast.reset_index(drop=True, inplace=True)
+        
+        #Add series between to remove the gap on the forecast plot
+        series_between = self.time_series.copy()
+        series_between = series_between[-1:]
+        series_between["Data_type"] = "Forecast"
+        
+        self.combine_ts_forecast_plot = None
+        self.combine_ts_forecast_plot = pd.concat([time_series_export, series_between, forecast_export])
+        self.combine_ts_forecast_plot.reset_index(drop=True, inplace=True)
+        
+        self.run_order_container.add("2. Forecast created")
+        
+        return self.ts_forecast
+    
+    
+    def show_ts_forecast(self):
+        
+        """
+        Function returns forecast and combined raw TS with forecast
+        
+        Returns: pandas DataFrame
+        
+        """
+        
+        if self.check_container(error_type = "2. Forecast created") != "OK":
+            return self.check_container(error_type = "2. Forecast created")
+        
+        return self.combine_ts_forecast, self.ts_forecast
+    
+        
+    def export_forecast_csv(self):
+        
+        """
+        Function combines raw time series and forecast into one data set.
+        Then the export is made.
+        
+        Returns: exports pandas DataDrame
+        
+        """
+        
+        if self.check_container(error_type = "2. Forecast created") != "OK":
+            return self.check_container(error_type = "2. Forecast created")      
+   
+        self.combine_ts_forecast.to_csv(f'WordlBank_Forecast_{self.country_name}_{self.times_series_name}.csv',
+                                        encoding='utf-8', index=None)               
+        
+        return f"The file was exported to the following location: {os.getcwd()}."
+    
+        
+    def show_forecast(self):
+        
+        """
+        Function uses seaborn library to show time series and forecast on a plot.
+        
+        Returns: seaborn lineplot
+        
+        """
+        
+        if self.check_container(error_type = "2. Forecast created") != "OK":
+            return self.check_container(error_type = "2. Forecast created")
+        
+        colors = ["#4374B3", "#FF0B04"]        
+        sns.set_palette(sns.color_palette(colors))
+        plot = sns.lineplot(x="Dates", y=self.combine_ts_forecast_plot.columns[1],  data=self.combine_ts_forecast_plot,
+                            hue='Data_type', linewidth = 3).set(title=f"Presented time series: {self.time_series.columns[1]}")
+        return plot
+    
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+#Class testing
+if __name__ == "__main__":
+    
+    pd.set_option('display.max_rows', 500)
+    
+    test = WordlBank("chn", "SL.AGR.EMPL.ZS")
+    
+    test.load_data()
+    test.show_time_series()
+    test.create_forecast()
+    test.show_ts_forecast()
+    test.export_forecast_csv()
+    test.show_forecast()  
+        
