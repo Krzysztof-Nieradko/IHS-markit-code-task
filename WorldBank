@@ -8,27 +8,24 @@ Created on Sun Jul  4 21:50:38 2021
 #Load libraries
 import requests
 import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
 import pmdarima as pm
-from pmdarima.model_selection import train_test_split
 import seaborn as sns
 import os
 
 #Define a class
-class WordlBank():
+class WorldBank():
     
-    def __init__(self, country_name: str = 'afg', times_series_name: str = 'NY.GDP.MKTP.CN'):
+    def __init__(self, country_name: str = 'afg', time_series_name: str = 'NY.GDP.MKTP.CN'):
         
         """
-        Constructs all the necessary attributes for the WordlBank object. 
+        Constructs all necessary attributes for the WorldBank object. 
         Forces to use json format.
         
         Parameters
         ----------
             country_name: str
                 - country. Default: "AFG"
-            times_series_name: str
+            time_series_name: str
                 - type of the time series. Default: "NY.GDP.MKTP.CN"
             address_API: str
                 - creates a link to WorldBank's API using user's parameters
@@ -37,8 +34,8 @@ class WordlBank():
         """
         
         self.country_name = country_name.upper()
-        self.times_series_name = times_series_name.upper()        
-        self.address_API = f'https://api.worldbank.org//v2//country//{country_name}//indicator//{times_series_name}?format=json'
+        self.time_series_name = time_series_name.upper()        
+        self.address_API = f'https://api.worldbank.org//v2//country//{country_name}//indicator//{time_series_name}?format=json'
         
         self.run_order_container = set()
         
@@ -48,7 +45,7 @@ class WordlBank():
         if error_type not in self.run_order_container:
             
             if error_type == "1. Data loaded":
-                return f"You can't visualize TS or make a forecast before loading the data! \
+                return "You can't visualize TS or make a forecast before loading the data! \
                         Please use 'load_data' method first."
             elif error_type == "2. Forecast created":
                 return "You can't return combined DF or show a forecast without making a forecast! \
@@ -86,7 +83,7 @@ class WordlBank():
     
         if self.check_connection() == "Ups, something went wrong!":
             return f"Time series with the provided parameters (Country: {self.country_name}, \
-                     Series: {self.times_series_name}) \
+                     Series: {self.time_series_name}) \
                      couldn't be loaded. Make sure such time series exists!"                
         
         #Get the information about the data first
@@ -106,7 +103,7 @@ class WordlBank():
         #Create pandas data frame
         self.time_series = pd.DataFrame({'Dates': list(map(int, dates)),
                                          'TS_' + self.country_name.upper() + '_' + 
-                                         self.times_series_name.upper(): values})
+                                         self.time_series_name.upper(): values})
         
         #Remove NA values if any
         self.time_series.dropna(inplace = True)
@@ -166,7 +163,7 @@ class WordlBank():
               
         self.ts_forecast = pd.DataFrame({'Dates': list(range(max_index + 1, max_index + n + 1)),
                                           'TS_' + self.country_name.upper() + '_' + 
-                                          self.times_series_name.upper(): forecast})  
+                                          self.time_series_name.upper(): forecast})  
         
         #Create combined DF with additional column determining if raw TS or Forecast
         time_series_export = self.time_series.copy()
@@ -221,7 +218,7 @@ class WordlBank():
         if self.check_container(error_type = "2. Forecast created") != "OK":
             return self.check_container(error_type = "2. Forecast created")      
    
-        self.combine_ts_forecast.to_csv(f'WordlBank_Forecast_{self.country_name}_{self.times_series_name}.csv',
+        self.combine_ts_forecast.to_csv(f'WorldBank_Forecast_{self.country_name}_{self.time_series_name}.csv',
                                         encoding='utf-8', index=None)               
         
         return f"The file was exported to the following location: {os.getcwd()}."
@@ -252,12 +249,13 @@ if __name__ == "__main__":
     
     pd.set_option('display.max_rows', 500)
     
-    test = WordlBank("chn", "SL.AGR.EMPL.ZS")
+    #test_instance = WorldBank("chn", "SL.AGR.EMPL.ZS")
+    #test_instance = WorldBank("chn", "AG.AGR.TRAC.NO")
+    test_instance = WorldBank()
+    test_instance.load_data()
+    test_instance.show_time_series()
+    test_instance.create_forecast()
+    test_instance.show_ts_forecast()
+    test_instance.export_forecast_csv()
+    test_instance.show_forecast() 
     
-    test.load_data()
-    test.show_time_series()
-    test.create_forecast()
-    test.show_ts_forecast()
-    test.export_forecast_csv()
-    test.show_forecast()  
-        
